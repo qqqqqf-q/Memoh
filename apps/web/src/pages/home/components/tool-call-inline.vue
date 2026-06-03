@@ -222,6 +222,9 @@ const renderedActionLabel = computed(
 )
 
 const rowClass = computed(() => {
+  if (props.block.toolName === 'exec') {
+    return expandable.value ? 'text-foreground hover:text-foreground' : 'text-foreground'
+  }
   if (!expandable.value) {
     return display.value.isError ? 'text-destructive' : 'text-muted-foreground'
   }
@@ -263,6 +266,7 @@ onBeforeUnmount(clearRunningTimer)
 
 const targetClass = computed(() => {
   if (showRunning.value) return 'tool-shimmer-text'
+  if (props.block.toolName === 'exec') return 'text-foreground'
   if (display.value.isError) return 'text-destructive'
   return 'text-foreground/80'
 })
