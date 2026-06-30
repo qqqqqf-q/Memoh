@@ -5,7 +5,7 @@
     @auxclick.middle.prevent="close"
   >
     <svg
-      v-if="isActive"
+      v-if="isTabSelected"
       class="active-tab-shape z-0"
       :viewBox="activeTabViewBox"
       :style="activeTabShapeStyle"
@@ -33,7 +33,7 @@
     <span
       class="relative z-[1] min-w-0 flex-1 truncate text-label leading-[1.3] tracking-normal transition-colors"
       :class="[
-        isActive ? 'text-foreground' : 'text-muted-foreground',
+        isTabSelected ? 'text-foreground' : 'text-muted-foreground',
       ]"
     >{{ title }}</span>
     <!-- Unsaved-changes dot: sits in the close slot at rest so the affordance never
@@ -47,7 +47,7 @@
       <span class="flex size-5 items-center justify-center">
         <span
           class="size-[7px] rounded-full"
-          :class="isActive ? 'bg-foreground' : 'bg-muted-foreground'"
+          :class="isTabSelected ? 'bg-foreground' : 'bg-muted-foreground'"
         />
       </span>
     </div>
@@ -102,7 +102,17 @@ const workspaceTabs = useWorkspaceTabsStore()
 const rootEl = ref<HTMLElement | null>(null)
 const panelId = props.params.api.id
 const title = ref(props.params.api.title ?? '')
-const isActive = ref(props.params.api.isActive)
+// One signal for the whole tab: am I my group's current tab? It drives the chip
+// shape, the label colour, and the dot together, so they can never disagree. There
+// is deliberately NO global-active concept here — after a split every group keeps
+// its own visible tab lit, which is what reads naturally; a single page-wide active
+// tab left the other group's tab looking dead.
+//
+// It is read by COMPARING against the group's own activePanel, recomputed on the
+// container's active-panel event. The DOM class signal is unreliable: keying off it
+// leaves stale tabs stuck selected (two lit chips in one group), the same trap the
+// terminal tab hit and fixed the same way.
+const isTabSelected = ref(props.params.api.isActive)
 // First-paint placeholder ONLY — these mirror the CSS contract (200≈12.5rem tab,
 // 35 = 40px strip − 5px inset, 8 = --tab-radius, 1px stroke) just so the active
 // SVG has a sane shape for the one frame before onMounted measures the real DOM.
@@ -136,9 +146,20 @@ const disposables = [
   props.params.api.onDidTitleChange((event) => {
     title.value = event.title
   }),
-  props.params.api.onDidActiveChange((event) => {
-    isActive.value = event.isActive
-    if (event.isActive) scheduleActiveTabShapeUpdate()
+  // Two event sources, one recompute. The container event fires whenever the
+  // GLOBALLY active panel changes — it covers tab switches and clicks across
+  // groups. But when a tab is dragged out to split, the SOURCE group silently
+  // promotes its next tab to visible while global focus follows the dragged tab
+  // to the new group; the container never fires for that, so the promoted tab
+  // would stay unlit until clicked. The panel's own visibility event fills that
+  // gap: it fires on the promoted tab the moment it becomes its group's visible
+  // one, regardless of which group holds global focus. syncTabSelected is
+  // idempotent, so the overlap between the two is harmless.
+  props.params.containerApi.onDidActivePanelChange(() => {
+    syncTabSelected()
+  }),
+  props.params.api.onDidVisibilityChange(() => {
+    syncTabSelected()
   }),
   props.params.containerApi.onDidLayoutChange(() => {
     scheduleActiveTabShapeUpdate()
@@ -149,7 +170,6 @@ const disposables = [
 // sets it right after init), so re-read once the addPanel call stack settled.
 onMounted(() => {
   title.value = props.params.api.title ?? title.value
-  isActive.value = props.params.api.isActive
   nextTick(() => {
     installShapeObserver()
     window.addEventListener('resize', scheduleActiveTabShapeUpdate)
@@ -170,8 +190,8 @@ onBeforeUnmount(() => {
   for (const d of disposables) d.dispose()
 })
 
-watch(isActive, (active) => {
-  if (active) nextTick(scheduleActiveTabShapeUpdate)
+watch(isTabSelected, (selected) => {
+  if (selected) nextTick(scheduleActiveTabShapeUpdate)
 })
 
 function installShapeObserver() {
@@ -183,10 +203,22 @@ function installShapeObserver() {
 
   const tab = root.closest<HTMLElement>('.dv-tab')
   if (tab && tab !== root) resizeObserver.observe(tab)
+
+  // Seed the selection now that the panel is mounted into its group; later
+  // changes come through the container's active-panel event above.
+  syncTabSelected()
+}
+
+function syncTabSelected() {
+  const panel = props.params.containerApi.getPanel(panelId)
+  const selected = panel?.group.activePanel?.id === panelId
+  if (selected === isTabSelected.value) return
+  isTabSelected.value = selected
+  if (selected) scheduleActiveTabShapeUpdate()
 }
 
 function scheduleActiveTabShapeUpdate() {
-  if (!isActive.value || pendingShapeFrame) return
+  if (!isTabSelected.value || pendingShapeFrame) return
 
   pendingShapeFrame = requestAnimationFrame(() => {
     pendingShapeFrame = 0
