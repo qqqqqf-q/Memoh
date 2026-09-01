@@ -96,7 +96,7 @@ picker 的状态永远是一个完整的 **(模型, 强度)对**。改强度 = �
 | P2′(welcome 不进历史 session) | 打开已有 session 只认它自己的对,repoint 一律重新播种 |
 | P2′(回 welcome 仍显示刚发的对) | welcome 显示来源链(低→高,每级产出完整对):平台默认 < bot 默认 < **该 bot 最近一条有对的 native session 的对** < 本机未发草稿 |
 | P7′/S4(永不弹回) | picker 纯乐观;落库异步、失败静默;不加重试队列,下一次发送就是重试 |
-| P7′(发了一条即永久) | 发送请求带对(现状);服务端在**请求被接收时**把对记下,不论当轮成败 |
+| P7′(发了一条即永久) | 实证:没碰 picker 时前端整条 omit 字段,"请求省略对"是常态 → web 入口每轮按**解析后的完整对**记(非请求原值),**门=入口**(渠道走 StartTurn 族永不写,web 每轮必写),不论当轮成败 |
 | P9′(首发不闪回) | 新 session 的诞生与首发对的写入,对后续读取必须原子可见(同事务,或先写对再广播 session 创建);写入完成前不重播种 |
 | P8′(最后发送者赢) | 不做多 tab 实时同步,不解冲突(刷新后一致即通过) |
 | P5′(ACP 进程重建) | 对双写 DB;进程冷启动(spawn/resume/e2b 重建)把 DB 对回灌进新进程;agent 在线时以 agent 自报为真相、回填 DB |
@@ -117,13 +117,13 @@ picker 的状态永远是一个完整的 **(模型, 强度)对**。改强度 = �
 请求携带的对 > session 记忆的对 > bot 默认 > 历史消息的对(仅存量数据兜底)
 ```
 
-改动点仅 `selectChatModel` / `resolveReasoningConfig` 两处。
+改动点仅 `selectChatModel` / `resolveReasoningConfig` 两处(全仓唯一调用点:`buildBaseRunConfig`,request 判空后、bot settings 前插一级;数据经 `GetSessionByID`,其为 `SELECT *`,迁移 + sqlc 重生后自动带出)。ACP session 在汇合点之前分流,不经过这里(ACP 有自己的模型概念)。
 
 ### 3.3 写入
 
 - picker 切换 → 乐观显示 + best-effort PATCH,失败静默(S4);
-- 发送 → 请求带对(现状);服务端在请求被接收时写回实际用的对,不论当轮成败(P7′);
-- 新 session 首条:创建 session 与写入首发对原子可见,前端无额外 PATCH(P9′);
+- **稳态写回(B):** web/REST 生成入口的唯一汇合点(application 层 `buildBaseRunConfig`,解析完成、生成未开始)每轮把**解析后的完整对** UPDATE 回 session——不论当轮生成成败,值不变则不写。**门是入口,不是数据**:渠道走 `StartTurn` 族、永不写;web 走 `StreamChatWS`/REST、每轮都写,没碰过 picker 也写(解析结果,此时多半是 bot 默认)——这是 S3"首发即事实快照"与 bot 默认降级的机制基础(P7′/S3)。已实证:用户没碰 picker 时前端整条 omit 该字段,"请求省略对"是常态,故写入值必须取解析结果而非请求原值;
+- **首发送对(D):** session 创建是单语句 INSERT、`session_created` 广播紧随其后(无事务可挂靠),写回点天然赶不上广播——故首条消息把请求携带的对随 INSERT 一起写(`createWSChatSession` 传参,渠道创建不传=恒 NULL);请求未携带时写 NULL,由 B 随后补全(此刻重播种显示 bot 默认=解析结果,无可见闪变)。广播前必有值,P9′ 无窗口,前端零额外动作;
 - 多 tab 各自写入,最后写入赢(P8′)。
 
 ### 3.4 播种
@@ -179,7 +179,7 @@ picker 双写(活体进程 `session/set_model` + DB);冷启动经 `applyPromptCo
 | ACP | 双写 + 冷启动回灌 | lobe 式"CLI 自报不落库" = 进程重建后无记录,治不了 8/18 的回退 |
 | subagent pin | pin 是初始对,用户可覆盖(只影响该 session) | pin 是锁 = 用户选了不生效,违反 S4/S5 |
 | 多 tab | 最后发送者赢,不做实时同步 | 实时同步 = 本期非目标(P8′ 边界) |
-| 记忆的产生时机 | 首发即事实快照:首发被服务端接收即记下当时的完整对,不要求碰过 picker | 仅主动 picker 才产生:违背"对 = 最近实际使用值",弱网 PATCH 丢失后无兜底 |
+| 记忆的产生时机 | 首发即事实快照:首发被服务端接收即记下当时的完整对,不要求碰过 picker | 仅主动 picker 才产生:违背"对 = session 当前确定值(稳态=最近实际使用;picker 未发的选择也算)",弱网 PATCH 丢失后无兜底 |
 | 写回时机 | 请求被服务端接收即记 | turn 成功后才记 = 失败轮丢对,与 P7′"发了一条即永久"矛盾 |
 | 模型被删 | `ON DELETE SET NULL` 回落 | RESTRICT 挡删除 / 悬空不兜底,都要额外规则 |
 
