@@ -1,201 +1,155 @@
-# Session 模型与推理强度持久化 · 设计稿
+# Session 模型+推理强度持久化 · 设计稿
 
 - **Issue:** memohai/Memoh#879 — [Web] Chat session 模型切换未持久化,刷新后回退 bot 默认模型
 - **状态:** 设计已拍板(2026-08-25 ~ 08-31),未实现
-- **参照:** lobe-chat PR #15933 / #18178(独立同构演化,见 §8)
-- **读法:** §1.1 修复前路径 / §1.2 修复后路径 是本稿的骨架,机制(§3-§5)只服务于路径;§7 定义三层验证。
+- **参照:** lobe-chat PR #15933 / #18178(独立同构演化,见 §5)
+- **读法:** 本稿从用户路径出发(§1),路径语义(§1.3)是全部技术设计(§3)的验收标准;凡路径与技术冲突,以路径为准。技术部分(§3)由 §2 的推导表生成——每条机制必须能指出它服务哪条路径,找不到出处的机制即越界。
 
-## 1. 问题
+## 1. 用户路径
 
-模型与 reasoning effort(下称 effort)的选择只存在于 ChatPane 组件实例的本地 ref(`chat-pane.vue:1008-1012`)。生命周期 = 一个 pane 实例的生命周期,产生两个用户可见症状:
+### 1.0 一个概念:模型+强度是一个"对"
 
-- **症状 1:** session 内选了非默认模型,二次请求切回老模型 —— pane 重建(刷新/关 tab 重开/ephemeral 被顶/切 bot)后重新从 bot 默认播种。
-- **症状 2:** 进入历史 session 带着 welcome 页选的模型 —— dockview repoint 不重重挂载,只清 `userPickedModel` flag 不清值(`chat-pane.vue:2138-2140`),残留值随每条消息显式发出,顶掉后端本可走的 session 历史 fallback。
+picker 的状态永远是一个完整的 **(模型, 强度)对**。改强度 = 只换对的强度分量;改模型 = 换掉整个对,强度落到新模型的默认档。不存在半个状态——发送的、显示的、记忆的、播种的全是完整对。
 
-后端现状:能收(WS/REST 每轮 override)、会用(当轮)、**不存**(`bot_sessions` 无相关列,139 个增量迁移无一涉及)。composer 永远显式发 `model_id`,后端 session 历史 fallback(`service_model_selection.go:24`)是死路。
+### 1.1 修复前路径(现状,逐条可复现)
 
-### 1.1 修复前的用户路径(现状,逐条可复现)
-
-以下路径按"今天会发生什么"记录,是本设计要消灭的行为。**P1/P2 是投诉原文(xhe 2026-08-14、Go 2026-07-29),其余从代码推出。**
+今天 picker 记住的对只活在 pane 组件内存里,pane 一死就回 bot 默认;且 welcome 选的对会残留、随消息显式发出,顶掉历史 session 本该用的值。(P1/P2 为投诉原文:xhe 2026-08-14、Go 2026-07-29;其余从代码推出。)
 
 | # | 用户动作 | 今天实际发生 |
 |---|---|---|
-| P1 | 在 session 里把模型切到 2,发消息,刷新页面 | composer 变回模型 1(bot 默认);下一条消息**静默用模型 1 发出**(用户以为还在用 2) |
-| P2 | welcome 页选了模型 2 不发;打开上周用模型 3 的历史 session | composer 显示模型 2,并且**发出的每条都带 model_id=2**,session 被迫用错模型 |
-| P3 | 手机/另一台电脑打开"模型 2"那个 session | 显示模型 1(值只在本机 pane 内存里) |
-| P4 | 关 tab 重开、ephemeral tab 被顶后重开、切 bot 再切回 | 同 P1,回模型 1 |
-| P5 | ACP(Codex/CC)会话 effort 选 max,发对话或刷新 | 回退 medium(Go 2026-08-18 实测) |
-| P6 | effort 切到不支持推理的模型再切回 | 原档位丢失,不恢复(此条**保留**,非目标) |
-| P7 | 弱网下切模型 | 能切(乐观 ref),但刷新即丢 |
+| P1 | session 里把对换成 (2, high),发消息,刷新 | composer 变回 (1, 默认档)(bot 默认);下一条**静默用 (1, 默认档) 发出**,用户以为还是 (2, high) |
+| P2 | welcome 选了 (2, high) 不发;打开上周用 (3, low) 的历史 session | composer 显示 (2, high),且**每条消息都把这个对显式发出**,session 被迫用错对 |
+| P3 | 手机/另一台电脑打开"对=(2, high)"的 session | 显示 (1, 默认档)——值只在本机 pane 内存里 |
+| P4 | 关 tab 重开、ephemeral tab 被顶后重开、切 bot 再切回 | 同 P1,回 (1, 默认档) |
+| P5 | ACP(Codex/CC)会话把强度选到 max,发对话或刷新 | 回退 medium(Go 2026-08-18 实测) |
+| P6 | 把对里的模型切到不支持推理的模型再切回 | 原强度档丢失,不恢复(此条**保留**,见 P6′) |
+| P7 | 弱网下换对 | 能换(乐观显示),刷新即丢 |
 
-### 1.2 修复后的目标用户路径(同一批场景,验收基准)
+### 1.2 修复后目标路径(验收基准)
 
-**P1′ 刷新不丢:** session 内切到模型 2 → picker 立即显示 2(PATCH 异步落库)→ 刷新 → 仍显示 2 → 发消息用 2。
+- **P1′ 刷新不丢:** session 里换成 (2, high) → 立即显示 → 刷新 → 仍 (2, high) → 发消息用 (2, high)。
+- **P2′ 会话隔离:** welcome 选 (2, high) 不发 → 打开历史 session(它的对是 (3, low))→ 显示 (3, low);回 welcome 仍 (2, high)(本机草稿)。welcome 选 (2, high) 发首条 → 新 session = (2, high);回 welcome 仍 (2, high)——此时它就是"最近 session 的对",多设备一致。
+- **P3′ 跨设备:** 桌面把某 session 换成 (2, high)(正常网络)→ 手机打开 → 显示 (2, high) → 不碰 picker 直接发 → 用 (2, high)。**换设备与刷新同权。**
+- **P4′ pane 无关:** 关 tab 重开 / ephemeral 被顶后重开 / 切 bot 再切回 → session 显示它自己的对。
+- **P5′ ACP 不回退:** 换成含 max 的对,刷新/重开/进程重建 → 仍是 max。
+- **P6′ 换模型=换整个对:** (2, high) 切模型到 5 → 显示 (5, 5 的默认档);切回 2 → 显示 (2, 2 的默认档),**不恢复** high。
+- **P7′ 弱网:** 换对 → 立即显示,**永不弹回**;任何一条消息发出去 → 这个对永久生效,之后刷新/换设备都是它。残余窗口(已接受):换了、PATCH 失败、一条没发就刷新 → 回旧值(网卡,能理解)。
+- **P8′ 多 tab:** 两个 tab 开同一 session,各显示各的,不实时同步;**谁发消息,这个 session 的对就定成谁显示的**(最后发送者赢)。刷新后一致。
+- **P9′ 首发不闪回:** welcome 带着 (2, high) 发首条 → 新 session 从头到尾显示 (2, high),中间不跳回默认。
+- **不变路径(回归基准):** Telegram 等渠道对话不变——在渠道里说话的人永远不需要知道"对"的存在;唯一例外:被 web 碰过的 session 在渠道里继续时,沿用它自己的对(这是 P3′ 的延伸,不是破绽)。subagent 会话的 pin 是它的初始对,可在其中改、只影响该 session;retry/edit 语义、运行中 turn 不受 picker 影响(picker 管下一发),同今天。
 
-**P2′ 会话隔离:** welcome 选 2 不发 → 打开历史 session(它上次用的是 3)→ composer 显示 **3**;回到 welcome 仍显示 2(草稿)。welcome 选 2 发首条 → 新 session = 2;回 welcome 仍显示 2(此时 2 = 该 bot 最近 session 的 preference,多设备一致)。
+### 1.3 路径语义(技术设计的验收标准,用户语言)
 
-**P3′ 跨设备:** 桌面把某 session 切到模型 2(正常网络)→ 手机打开该 session → 显示 2 → 不碰 picker 直接发 → 用 2。**换设备场景自此与刷新同权**,preference 在服务端。
+- **S1 对是 session 的属性:** 换 pane、刷新、关 tab、换设备,都不变。
+- **S2 welcome 是草稿态:** 未发的对只待在本机 welcome;一发就进新 session,从此跟着 session 走。
+- **S3 没碰过 = 今天:** 从未选过的 session 和渠道,行为与今天逐字节一致。
+- **S4 选了就显示:** 任何网络状况下 picker 不回弹;落库失败不产生用户可见错误。
+- **S5 发送时捕获:** picker 显示的对 = 下一条消息用的对;运行中的 turn 不被追改。
+- **S6 对永远完整合法:** 换模型→整个对换新(强度落新模型默认档);换强度→只换强度;显示、发送、记忆、播种的任何出口,对都是完整合法对。
 
-**P4′ pane 生命周期无关:** 关 tab 重开 / ephemeral 被顶后重开 / 切 bot 再切回 → 播种链重新解析,session 显示自己的值。
+## 2. 推导:路径强迫技术做什么
 
-**P5′ ACP 不回退:** effort 选 max,刷新/重开/进程重建 → 仍 max(DB 双写 + 冷启动 replay)。
+每条机制只因为它服务的路径而存在。
 
-**P6′ 保留 P6:** 切到不支持推理的模型,effort 落到该模型合法档(不报错);切回不恢复原档。
+| 路径 | 强迫出的结论 |
+|---|---|
+| P1′/P3′/P4′(pane 死、刷新、换设备都不变) | 对必须存在服务端、挂在 session 上;pane 里只是显示副本 |
+| P3′(换设备第一眼看对) | 显示来源链必须服务端可出 → 整条链放服务端 |
+| P2′(welcome 不进历史 session) | 打开已有 session 只认它自己的对,repoint 一律重新播种 |
+| P2′(回 welcome 仍显示刚发的对) | welcome 显示来源链(低→高,每级产出完整对):平台默认 < bot 默认 < **该 bot 最近一条有对的 native session 的对** < 本机未发草稿 |
+| P7′/S4(永不弹回) | picker 纯乐观;落库异步、失败静默;不加重试队列,下一次发送就是重试 |
+| P7′(发了一条即永久) | 发送请求带对(现状);服务端在**请求实际发出时**把对记下,不论当轮成败 |
+| P9′(首发不闪回) | 新 session 的诞生与首发对的写入,对后续读取必须原子可见(同事务,或先写对再广播 session 创建);写入完成前不重播种 |
+| P8′(最后发送者赢) | 不做多 tab 实时同步,不解冲突(刷新后一致即通过) |
+| P5′(ACP 进程重建) | 对双写 DB;进程冷启动(spawn/resume/e2b 重建)把 DB 对回灌进新进程;agent 在线时以 agent 自报为真相、回填 DB |
+| S3(没碰过=今天) | 渠道请求不携带对 → 这类 session 没有记忆 → 行为同今天,零特例代码 |
+| S6(完整合法) | 任何写库/播种/回放出口,reconcile 出完整合法对,DB 不存非法对 |
 
-**P7′ 弱网:** 切模型 → picker 立即变,永不回滚;PATCH 静默失败;任何一条消息发出去 → 模型 2 永久落库,之后刷新/换设备都是 2。残余窗口:切了但一条没发就刷新 → 回旧值(网卡,可理解,已接受)。
-
-**不变路径(回归基准):** Telegram 等渠道对话逐字节不变;subagent pin、retry/edit 语义不变;运行中 turn 不受 picker 影响(发送时捕获,现状保留)。
-
-### 1.3 路径与机制的映射(每条症状指向哪个机制)
-
-| 路径 | 依赖机制 | 章节 |
-|---|---|---|
-| P1′/P3′/P4′ | preference 两列 + 服务端写回 + 播种链 | §3.1/3.2/3.3/3.4 |
-| P2′ | repoint 重播种 + 草稿 + 最近 session 种子 | §3.4、§4-2/3/4 |
-| P5′ | ACP 双写 + replay | §3.5 |
-| P7′ | 纯乐观 + 写回兜底 | §3.3 |
-| 不变路径 | 渠道请求不带 model_id → preference 恒 NULL | §3.1 |
-
-## 2. 目标
-
-1. 一个 session 的模型/effort 是这个 session 的属性:换 pane、刷新、关 tab、换设备,都不变。
-2. welcome 的选择只跟随它创建的新 session,不漂进任何已存在的 session;发出去之后不丢。
-3. 未主动选择过的值,行为与今天逐字节一致(bot 默认;IM 渠道零改动)。
-4. 服务端是唯一真相源;picker 显示 = 服务端解析结果。
-5. 任何时刻发出的消息,用的模型 = picker 当时显示的值。
-
-## 3. 核心机制
+## 3. 技术设计(由 §2 生成,受 §1.3 验收)
 
 ### 3.1 存储
 
-`bot_sessions` 加两列(schedule 0130 真实列先例):
+- `bot_sessions` 加 `preferred_chat_model_id` / `preferred_reasoning_effort` 两列——物理两列,逻辑一个对:成对写入、成对清空,代码里只有"session 对"一个概念。`ON DELETE SET NULL`(模型被删,对自然回落到解析链)。
+- `bot_history_messages` 补 `reasoning_effort` 列(存量 session 打开时"历史消息的对"需要它;现在每轮 effort 无记录)。
+- 没有记忆的 session 两列皆 NULL;IM 渠道 session 恒 NULL(S3 的零特例结构,不是判断出来的,是结构保证的)。
 
-```sql
-preferred_chat_model_id     UUID REFERENCES models(id)  -- NULL = 从未主动选择
-preferred_reasoning_effort  TEXT                        -- NULL 同上
-```
-
-- NULL = 跟随解析链,行为与今天一致。写回只发生在"请求显式携带 model_id"的 turn(web/REST 每条消息都带;渠道请求从不带)——因此 **IM 渠道的 session 行 preference 恒 NULL,零代码隔离**;web session 在首次发送后被写回(惰性快照,见 §3.3)。
-- 写入时服务端 reconcile(档位对模型合法性),DB 永不存非法档位。
-- `bot_history_messages` 补 `reasoning_effort` 列(现在每轮 effort 无记录)。
-
-### 3.2 每轮解析链(在既有两级间插一级)
+### 3.2 每轮解析链
 
 ```
-request override > session preference > bot 默认 > 历史 fallback(现状保留)
+请求携带的对 > session 记忆的对 > bot 默认 > 历史消息的对(仅存量数据兜底)
 ```
 
 改动点仅 `selectChatModel` / `resolveReasoningConfig` 两处。
 
-### 3.3 持久化时机:picker 纯乐观,落库靠服务端写回
+### 3.3 写入
 
-```
-picker 切到 X   → 纯乐观,秒切,永不阻塞、永不回滚
-PATCH(尽力而为) → 提前持久化;失败静默,不弹错、不回滚
-发送消息        → 消息本身带 model_id(现状),turn 完成后服务端把
-                 实际用的模型/effort 写回 preference   ← 持久化兜底
-```
+- picker 切换 → 乐观显示 + best-effort PATCH,失败静默(S4);
+- 发送 → 请求带对(现状);服务端在请求实际发出时写回实际用的对,不论当轮成败(P7′);
+- 新 session 首条:创建 session 与写入首发对原子可见,前端无额外 PATCH(P9′);
+- 多 tab 各自写入,最后写入赢(P8′)。
 
-- 弱网路径:能切、能看,发不出去是"发消息"被网限制,不是"换模型"被限制;任何一条消息发出去,X 就永久落库。
-- 唯一退化窗口:切了 X、PATCH 失败、一条没发就刷新 → 回旧值(用户已接受:"网很卡,我能理解")。不加重试队列,下一次发送就是重试。
-- **preference = 最近实际使用值**(服务端写回维护)。这一条同时替代了"创建即快照"(C4)与方向①的"last-used seed":web session 首次发送即被写回(事实快照);老 session 在下一次发送后获得 preference,此前打开时按播种链显示历史消息模型;未选过且未发过的 session 保持 NULL 跟随 bot 默认 —— 三个机制合成一个。
-- 写回范围:仅当请求显式携带 model_id/effort 时写回(web/REST 行为;渠道请求不带,不写)。
+### 3.4 播种
 
-### 3.4 播种链(打开 session / welcome 显示,低 → 高)
+- 已有 session:它自己的对 > subagent pin 初值 > 历史消息的对 > bot 默认;repoint 一律重播种(P2′)。
+- welcome:§2 来源链,由服务端一次出齐完整对(跨设备);本机草稿是链顶唯一本地级,按 bot 维度存 localStorage,进 `useComposerDrafts` 同机制,首发即清。
+- 种子查询口径:该 bot 最近一条 preference 非 NULL 的 native session;ACP/subagent 不计入。
+- 运行中 turn 不被追改:picker 是"下一发的对"(S5,现状保留)。
 
-```
-平台默认模型
-< bot 默认(bots.chat_model_id)
-< 最近活跃 native session 的 preference(查询,非存储;subagent pin / ACP 不计入)
-< localStorage 未发送草稿(按 bot 维度,首发即清)
-```
+### 3.5 ACP
 
-effort 同链,最底层换成模型自身默认档。
+picker 双写(活体进程 `session/set_model` + DB);冷启动经 `applyPromptConfig` 回灌 DB 对(P5′);agent 在线时自报为真相、回填 DB——已打开 pane 不回显,刷新后一致,与 P8′ 同权。
 
-- welcome 语义:未发的选择草稿兜着(本设备);发了的跟着"最近在用"走(多设备同步);bot 默认只服务 IM 渠道 + 首次使用 —— web 不再以它为起点。
-- 已存在的 session 打开时:preference > subagent pin > 历史消息模型 > bot 默认;repoint 时**重新播种**(修症状 2)。
-- 换设备打开 session(用户核心场景:桌面为难题切了模型 2,手机打开):正常网络下切换即 PATCH 落库,手机播种链第一级命中 → 显示模型 2,不碰 picker 直接发也用 2。与刷新同权。
-- 运行中 turn 不受 picker 影响(发送瞬间捕获,现状不变):picker 是"下一发的模型"。
+### 3.6 非目标
 
-### 3.5 ACP(Codex/CC)
+- 多 tab 实时同步(P8′ 已定边界)
+- 逐条消息对的 UI 投影展示
+- IM 渠道 `/model` 写 session 对
+- 跨模型的强度记忆(P6′ 已定:不恢复)
+- 第二张全局偏好表(lobe 式 per-(user, model))
 
-- 同两列;picker 切换时双写:活体进程 `session/set_model` + DB PATCH。
-- agent 进程冷启动(spawn/resume/e2b 重建)时经 `applyPromptConfig` 把 DB 值 replay 给新进程 —— 治 2026-08-18 反馈的 effort 回退 medium。
-- 真相方向:agent 在线时 agent 自报为真相(CLI `/model` 改了以它为准)、回填 DB;DB 只做冷启动种子。永不解冲突。
+## 4. 验证:问题证明 → 路径正确性 → 执行正确性
 
-## 4. 前端改动清单
+### 4.1 问题证明(修复前,可先做)
 
-1. picker 切换 → 乐观 ref + best-effort PATCH(复用 session PATCH 端点,加两字段)。
-2. repoint / 打开已有 session → 按播种链重新播种,替换现"只清 flag"逻辑;顺手删 `chat-list.ts:184-185` 死 ref。
-3. welcome 草稿:模型/effort 两个字段进 `useComposerDrafts` 同机制,首发即清。
-4. welcome 种子:最近 native session preference 查询(服务端出一条轻量接口或复用 session list 投影)。
-5. 新 session 首发创建时写入当前值(PATCH 即写,不等发送完成)。
-6. PATCH 未确认期间,任何 refetch 不得回滚显示值(pending-writes 对账,lobe 同坑已验)。
+在当前 main 上按 §1.1 逐条复现留证:每条路径记录"用户动作 → 观察到的错误值 + 证据"(截图 / WS payload 里的对 / 服务端日志解析出的对)。P1/P2/P5 已有群聊实测,此步补齐 P3/P4/P6/P7 并统一成证据包。**这同时是 §4.3 的回归基线。**
 
-## 5. 后端改动清单
+### 4.2 路径正确性(设计证明,实现前即可评审)
 
-1. 迁移:两列 + `bot_history_messages.reasoning_effort`;同步更新 `0001_init.up.sql` 全量定义。
-2. session PATCH 接受两字段,写入时 reconcile(非法档位 → 该模型默认档,静默)。
-3. 解析链插级(§3.2)。
-4. turn 完成后写回实际模型/effort 到 preference。
-5. welcome 种子查询(最近活跃 native session 的 preference)。
-6. ACP:PATCH acp-runtime 双写 DB;`applyPromptConfig` replay(§3.5)。
+- §1.3 六条语义逐条被 §1.2 路径覆盖;P1′–P9′ 与不变路径每条能沿 §3 推出唯一确定的对,不存在推不出的路径;
+- 退化窗口显式有界:全设计仅 P7′ 一条(已接受),不存在"picker 自己弹回"的路径;
+- §3 每条机制能在 §2 找到服务的路径——找不到的即越界,应删。
 
-## 6. 非目标(本期不做)
+### 4.3 执行正确性(实现与 spec 的一致性)
 
-- 多 tab ws 实时模型同步(刷新后一致即通过)
-- 逐条消息模型/effort 的 UI 投影展示
-- IM 渠道 `/model` 命令写 session preference
-- composer 改"仅显式选择才发 model_id"
-- effort per-(user, model) 全局偏好层(lobe 式第二张表)
-- effort 跨不兼容模型切换后的恢复记忆(D2:不恢复,与今天一致)
+- **机制级测试(AI 写):** 解析链四级顺序;写回条件(请求带对才写,渠道不写、失败轮也写);reconcile(非法对 → 完整合法对);首发生成原子可见(写前不重播);种子查询口径;ACP 冷启动回灌。
+- **路径级脚本(AI 跑,对照 §1.2):** 每条 P′ 写成可重复步骤(弱网=断 PATCH;跨设备=两个浏览器 profile),输出三元组——**composer 显示 = WS payload = 服务端记忆**,一致才通过;含 P9′ 不闪回、P8′ 多 tab。
+- **回归对照(§4.1 基线):** 渠道路径前后逐字节一致;P6 保留不变。
 
-## 7. 验证:问题证明 → 路径正确性 → 执行正确性
+### 4.4 人类 QA(终审,不可代理)
 
-验证分三层,各答一个问题:**问题是真的吗** / **修完的路径对吗** / **spec 被正确执行了吗**。AI 负责前两层的可自动化部分与全部证据准备;第三层的 happy path 由人类 QA 终审(§7.4)。
+§1.2 全部路径 + 不变路径,人走真实 happy path(真手机换设备、真 Telegram 会话)。通过标准:每条路径三处一致(composer 显示 = 消息实际用的对 = 换端后的显示)且符合 §1.2。AI 的 §4.3 结果只是输入材料。
 
-### 7.1 问题证明(修复前,可先做)
-
-在当前 main 上按 §1.1 逐条复现并留证:每条路径记录"用户动作 → 观察到的错误值 + 证据"(截图/网络面板里 WS payload 的 model_id/服务端日志解析出的模型)。P1/P2/P5 已有群聊实测记录,此步是把剩余路径补齐并统一成证据包。**这同时是 §7.3 回归对比的基线。**
-
-### 7.2 路径正确性(设计本身的证明)
-
-设计级断言,实现前即可评审:
-
-- 播种链的每一级有唯一所属(草稿=本设备未发送、最近 session=服务端已发送、bot 默认=渠道与首次、平台默认=兜底),四级互斥且穷尽"值从哪来"——**P1′–P7′ 每条都能沿链推出唯一确定值**,不存在推不出的路径;
-- NULL 语义使渠道行为与 today 逐字节一致(渠道请求不带 model_id → 不写回 → 解析链与现状同形);
-- 弱网退化窗口显式且有界(§3.3),不存在"picker 自己弹回"的路径。
-
-### 7.3 执行正确性(实现与 spec 的一致性)
-
-- **机制级测试(AI 写,可自动):** 解析链优先级(selectChatModel 插级后的四级顺序);PATCH reconcile(非法档位 → 默认档,不落非法值);写回仅在请求带 model_id 时发生;播种链各级回退;pending-writes 对账(PATCH 未确认时 refetch 不回滚);ACP 冷启动 replay 携带 DB 值。
-- **路径级脚本(AI 跑,对照 §1.2):** 每条 P′ 路径写成可重复步骤(含弱网:devtools 断 PATCH;跨设备:两个浏览器 profile),输出"composer 显示值 + WS payload model_id + DB preference 值"三元组,三者一致才通过——**显示、发送、落库三处对齐**是本设计的核心不变量。
-- **回归对照(§7.1 基线):** P6 保留不变;渠道路径在修复前后输出逐字节一致。
-
-### 7.4 人类 QA(终审,不可代理)
-
-§1.2 全部 P′ 路径 + 不变路径,由人走真实 happy path(真手机换设备、真 Telegram 会话)。通过标准:每条路径的 composer 显示 = 消息实际使用模型 = 换端后的显示,三处一致且符合 §1.2 预期。AI 的 §7.3 结果作为输入材料,不替代本层。
-
-## 8. 取舍记录
+## 5. 取舍记录
 
 | 决策点 | 采纳 | 否决及其原因 |
 |---|---|---|
-| 主方向(#879 三选一) | ②preference 列 + PATCH | ①last-used seed 只治一半(effort 无历史可 seed);③ACP 那套本身不落库 |
-| welcome 选择语义 | 草稿 + 最近 session 种子链 | lobe 式写 agent 默认 = channel 地狱(bot 默认被 IM 每轮实时消费);新造"前端默认模型"实体 = 概念负担 |
-| effort 层级 | per-session 与模型同构 | lobe 式 per-(user,model) 全局层 = 第二张表、两套解析,ACP 的 effort 仍得 per-session,两套并存 |
-| 弱网 PATCH 失败 | 纯乐观 + 服务端写回兜底 | "失败回滚" = 网卡时不让换模型,最差路径(用户原话:"5 秒后改回去,这很逆天") |
-| ACP | 双写 + 冷启动 replay | lobe 式"CLI 自报不落库" = cloud/e2b 重启丢 agent 文件后无记录,治不了 8/18 的回退 |
-| C4 快照语义(默认,随 §3.3 消解) | 写回即事实快照,不做创建时快照 | lobe 创建时快照会给"从未选择也从未发送"的 session 也定死值;写回方案下未发过的 session 保持 NULL 跟随 bot 默认,少一次写,行为差异仅在"从未发送的空 session"上 |
-| D2 effort 恢复(默认) | 不恢复 | 与今天一致,不引入 per-model 记忆 |
-| E3 ACP 真相(默认) | agent 在线赢,DB 冷启动种子 | 不写冲突解决逻辑 |
+| 配置单位 | (模型, 强度)成对,单值语义 | 两个独立设置 = 双链双写双 reconcile,换模型时强度语义永远要特判 |
+| 主方向(#879 三选一) | ②preference 列 + PATCH | ①last-used seed 只治一半(强度无历史可 seed);③ACP 那套本身不落库 |
+| welcome 语义 | 草稿 + 最近 session 种子链 | lobe 式写 agent 默认 = channel 地狱(bot 默认被 IM 每轮实时消费);新造"前端默认模型"实体 = 概念负担 |
+| 弱网 PATCH 失败 | 纯乐观 + 发送即落库 | "失败回滚" = 网卡时不让换,最差路径(用户原话:"5 秒后改回去,这很逆天") |
+| ACP | 双写 + 冷启动回灌 | lobe 式"CLI 自报不落库" = 进程重建后无记录,治不了 8/18 的回退 |
+| subagent pin | pin 是初始对,用户可覆盖(只影响该 session) | pin 是锁 = 用户选了不生效,违反 S4/S5 |
+| 多 tab | 最后发送者赢,不做实时同步 | 实时同步 = 本期非目标(P8′ 边界) |
+| 写回时机 | 请求实际发出即记 | turn 成功后才记 = 失败轮丢对,与 P7′"发了一条即永久"矛盾 |
+| 模型被删 | `ON DELETE SET NULL` 回落 | RESTRICT 挡删除 / 悬空不兜底,都要额外规则 |
 
-**lobe 参照结论:** PR #15933(arvinxx,2026-06-16 创建/07-22 合并)。模型 per-topic pin(创建快照 + topic 内切换 UPDATE)与本设计同构;分歧在 effort 层级(他们 per-user-model)与 welcome 语义(他们写 agent 默认)。异构 agent 他们不存模型、CLI per-run 自报,我们不抄(见上表)。其 pending-writes 对账(乐观写防 refetch 冲掉)直接采纳。
+**lobe 参照结论:** PR #15933(arvinxx,2026-06-16 创建 / 07-22 合并)。模型 per-topic pin(创建快照 + topic 内切换 UPDATE)与本设计同构;分歧在强度层级(他们 per-(user, model) 全局层)与 welcome 语义(他们写 agent 默认)。异构 agent 他们不存模型、CLI per-run 自报,我们不抄(见上表)。其 pending-writes 对账(乐观写防 refetch 冲掉)在本设计对应 P9′ 的写入时序与 §3.4 重播种。
 
-## 9. 实现顺序
+## 6. 实现顺序
 
-1. DB 迁移 + sqlc
-2. session PATCH(reconcile)+ 解析插级 + 写回
+1. DB 迁移 + sqlc(两列 + history effort 列,`0001_init.up.sql` 同步)
+2. PATCH(reconcile)+ 解析插级 + 写回(含首发生成原子可见)
 3. welcome 种子查询
-4. 前端:乐观 PATCH、repoint 重播种、草稿两字段、pending-writes 对账
-5. ACP 双写 + replay
-6. QA §7 全表
+4. 前端:乐观 PATCH、repoint 重播种、草稿对、首发时序
+5. ACP 双写 + 回灌
+6. QA §4 全表
