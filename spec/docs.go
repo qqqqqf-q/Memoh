@@ -17654,14 +17654,140 @@ const docTemplate = `{
                 }
             }
         },
+        "contextfrag.CacheClass": {
+            "type": "string",
+            "enum": [
+                "stable",
+                "dynamic",
+                "never"
+            ],
+            "x-enum-varnames": [
+                "CacheStable",
+                "CacheDynamic",
+                "CacheNever"
+            ]
+        },
+        "contextfrag.CachePlan": {
+            "type": "object",
+            "properties": {
+                "stable_message_count": {
+                    "type": "integer"
+                },
+                "stable_prefix_hash": {
+                    "type": "string"
+                },
+                "stable_prefix_token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContentRange": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextBudgetPlan": {
+            "type": "object",
+            "properties": {
+                "actual_system_cost": {
+                    "type": "integer"
+                },
+                "current_request_cost": {
+                    "type": "integer"
+                },
+                "estimator": {
+                    "type": "string"
+                },
+                "estimator_safety_factor_percent": {
+                    "type": "integer"
+                },
+                "history_budget": {
+                    "type": "integer"
+                },
+                "output_reserve": {
+                    "type": "integer"
+                },
+                "system_budget": {
+                    "type": "integer"
+                },
+                "tool_defs_cost": {
+                    "type": "integer"
+                },
+                "window": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.ContextRef": {
+            "type": "object",
+            "properties": {
+                "content_hash": {
+                    "type": "string"
+                },
+                "durability": {
+                    "$ref": "#/definitions/contextfrag.RefDurability"
+                },
+                "hash_algo": {
+                    "type": "string"
+                },
+                "hash_scope": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "namespace": {
+                    "type": "string"
+                },
+                "range": {
+                    "$ref": "#/definitions/contextfrag.ContentRange"
+                },
+                "schema": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "contextfrag.LifecycleSnapshot": {
             "type": "object",
             "properties": {
                 "assistant_message_id": {
                     "type": "string"
                 },
+                "budget_plan": {
+                    "$ref": "#/definitions/contextfrag.ContextBudgetPlan"
+                },
+                "cache_plan": {
+                    "$ref": "#/definitions/contextfrag.CachePlan"
+                },
                 "counts": {
                     "$ref": "#/definitions/contextfrag.ManifestCounts"
+                },
+                "final_input_hash": {
+                    "type": "string"
+                },
+                "mutations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.MutationRecord"
+                    }
+                },
+                "selection": {
+                    "$ref": "#/definitions/contextfrag.SelectionTrace"
+                },
+                "selection_decisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/contextfrag.SelectionDecision"
+                    }
                 },
                 "version": {
                     "type": "integer"
@@ -17698,6 +17824,160 @@ const docTemplate = `{
             ],
             "x-enum-varnames": [
                 "ViewRunConfigPreProvider"
+            ]
+        },
+        "contextfrag.MutationKind": {
+            "type": "string",
+            "enum": [
+                "before_model_call_hook",
+                "background_summary",
+                "mid_task_prune",
+                "injected_message",
+                "context_view_fallback",
+                "context_budget_failure",
+                "context_budget_disabled",
+                "capability_gate",
+                "read_media"
+            ],
+            "x-enum-varnames": [
+                "MutationBeforeModelCallHook",
+                "MutationBackgroundSummary",
+                "MutationMidTaskPrune",
+                "MutationInjectedMessage",
+                "MutationContextViewFallback",
+                "MutationContextBudgetFailure",
+                "MutationContextBudgetDisabled",
+                "MutationCapabilityGate",
+                "MutationReadMedia"
+            ]
+        },
+        "contextfrag.MutationRecord": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/contextfrag.MutationKind"
+                }
+            }
+        },
+        "contextfrag.RefDurability": {
+            "type": "string",
+            "enum": [
+                "durable",
+                "synthetic",
+                "debug"
+            ],
+            "x-enum-varnames": [
+                "RefDurable",
+                "RefSynthetic",
+                "RefDebug"
+            ]
+        },
+        "contextfrag.RetentionTier": {
+            "type": "string",
+            "enum": [
+                "",
+                "required",
+                "preferred",
+                "optional"
+            ],
+            "x-enum-varnames": [
+                "RetentionUnspecified",
+                "RetentionRequired",
+                "RetentionPreferred",
+                "RetentionOptional"
+            ]
+        },
+        "contextfrag.SelectionDecision": {
+            "type": "object",
+            "properties": {
+                "cache_class": {
+                    "$ref": "#/definitions/contextfrag.CacheClass"
+                },
+                "decision": {
+                    "$ref": "#/definitions/contextfrag.SelectionDecisionKind"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_count": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "ref": {
+                    "$ref": "#/definitions/contextfrag.ContextRef"
+                },
+                "retention_tier": {
+                    "$ref": "#/definitions/contextfrag.RetentionTier"
+                },
+                "slot": {
+                    "$ref": "#/definitions/contextfrag.Slot"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "text_bytes": {
+                    "type": "integer"
+                },
+                "token_estimate": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.SelectionDecisionKind": {
+            "type": "string",
+            "enum": [
+                "selected",
+                "trimmed",
+                "dropped"
+            ],
+            "x-enum-varnames": [
+                "DecisionSelected",
+                "DecisionTrimmed",
+                "DecisionDropped"
+            ]
+        },
+        "contextfrag.SelectionTrace": {
+            "type": "object",
+            "properties": {
+                "drop_reasons": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
+                },
+                "dropped": {
+                    "type": "integer"
+                },
+                "selected": {
+                    "type": "integer"
+                }
+            }
+        },
+        "contextfrag.Slot": {
+            "type": "string",
+            "enum": [
+                "system",
+                "before_history",
+                "history",
+                "after_history_before_current",
+                "current_user",
+                "after_current"
+            ],
+            "x-enum-varnames": [
+                "SlotSystem",
+                "SlotBeforeHistory",
+                "SlotHistory",
+                "SlotAfterHistoryBeforeCurrent",
+                "SlotCurrentUser",
+                "SlotAfterCurrent"
             ]
         },
         "conversation.SkillActivation": {
@@ -21615,7 +21895,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "reasoning_dialect": {
-                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty means the\nprovider's modern default.",
+                    "description": "ReasoningDialect declares the wire shape of this model's thinking control,\nwhich cannot be inferred from the tiers it advertises: Gemini 2.5 takes a\ntoken budget while 3.x takes a named level, and the two are mutually\nexclusive on the same request. Declared per model because the alternative is\nsniffing the model id, and an id is not a capability. Empty leaves provider\npolicy in charge; Google's adaptor deliberately sends no thinking control so\npre-dialect rows retain their safe pre-upgrade request shape.",
                     "type": "string"
                 },
                 "reasoning_efforts": {

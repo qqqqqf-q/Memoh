@@ -7,5 +7,19 @@ if ! command -v go >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "Check Go test..."
-go test ./...
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+dirs=$(sh "$SCRIPT_DIR/changed-go-dirs.sh")
+
+if [ "$dirs" = "ALL" ]; then
+  echo "Check Go test (full repo)..."
+  go test ./...
+elif [ -z "$dirs" ]; then
+  echo "No Go changes, skipping Go test..."
+  exit 0
+else
+  # 只测变更包；跨包破坏由 CI 全量兜底，本地可用 MEMOH_FULL_CHECKS=1 强制全量
+  pkgs=$(echo "$dirs" | sed 's|^|./|; s|$|/...|')
+  echo "Check Go test (changed packages)..."
+  # shellcheck disable=SC2086
+  go test $pkgs
+fi

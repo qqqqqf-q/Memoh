@@ -2,68 +2,32 @@
 <template>
   <SettingsSection :title="$t('bots.settings.blocks.multimedia')">
     <SettingsRow
-      :label="$t('bots.settings.ttsModel')"
+      v-for="row in rows"
+      :key="row.field"
+      :label="$t(row.labelKey)"
       stack="sm"
     >
-      <div class="w-full sm:w-56">
+      <div class="flex w-full justify-end sm:w-56">
         <ModelSelect
-          v-model="form.tts_model_id"
-          :models="speechModelOptions"
-          :providers="speechProviderOptions"
-          model-type="speech"
-          :placeholder="$t('bots.settings.ttsModelPlaceholder')"
-          :none-label="$t('common.none')"
+          v-if="row.models.length > 0 || form[row.field]"
+          v-model="form[row.field]"
+          :models="row.models"
+          :providers="row.providers"
+          :model-type="row.modelType"
+          :placeholder="$t(row.placeholderKey)"
+          :none-label="row.clearable ? $t('common.none') : undefined"
         />
-      </div>
-    </SettingsRow>
-
-    <SettingsRow
-      :label="$t('bots.settings.transcriptionModel')"
-      stack="sm"
-    >
-      <div class="w-full sm:w-56">
-        <ModelSelect
-          v-model="form.transcription_model_id"
-          :models="transcriptionModelOptions"
-          :providers="transcriptionProviderOptions"
-          model-type="transcription"
-          :placeholder="$t('bots.settings.transcriptionModelPlaceholder')"
-          :none-label="$t('common.none')"
-        />
-      </div>
-    </SettingsRow>
-
-    <SettingsRow
-      :label="$t('bots.settings.imageModel')"
-      :description="$t('bots.settings.imageModelDescription')"
-    
-      stack="sm"
-    >
-      <div class="w-full sm:w-56">
-        <ModelSelect
-          v-model="form.image_model_id"
-          :models="imageCapableModels"
-          :providers="providers"
-          model-type="chat"
-          :placeholder="$t('bots.settings.imageModelPlaceholder')"
-        />
-      </div>
-    </SettingsRow>
-
-    <SettingsRow
-      :label="$t('bots.settings.videoModel')"
-      :description="$t('bots.settings.videoModelDescription')"
-    
-      stack="sm"
-    >
-      <div class="w-full sm:w-56">
-        <ModelSelect
-          v-model="form.video_model_id"
-          :models="videoModels"
-          :providers="videoProviders"
-          model-type="video"
-          :placeholder="$t('bots.settings.videoModelPlaceholder')"
-        />
+        <!-- A select whose only option is "None" is a dead end; when no model
+             exists, the row becomes a doorway to the page that creates one. -->
+        <Button
+          v-else
+          variant="outline"
+          size="sm"
+          @click="openModelSettings(row.routeName)"
+        >
+          <Plus />
+          {{ $t('models.addModel') }}
+        </Button>
       </div>
     </SettingsRow>
   </SettingsSection>
@@ -71,7 +35,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { SettingsRow, SettingsSection } from '@felinic/ui'
+import { useRouter } from 'vue-router'
+import { Plus } from 'lucide-vue-next'
+import { Button, SettingsRow, SettingsSection } from '@felinic/ui'
 import ModelSelect from './model-select.vue'
 import type {
   SettingsSettings,
@@ -80,9 +46,23 @@ import type {
   AudioTranscriptionModelResponse,
   AudioTranscriptionProviderResponse,
   ModelsGetResponse,
+  ModelsModelType,
   ProvidersGetResponse,
   VideoProviderResponse,
 } from '@memohai/sdk'
+
+interface MultimediaRow {
+  field: 'tts_model_id' | 'transcription_model_id' | 'image_model_id' | 'video_model_id'
+  labelKey: string
+  placeholderKey: string
+  models: ModelsGetResponse[]
+  providers: ProvidersGetResponse[]
+  modelType: ModelsModelType
+  // clearable rows offer an explicit "None" entry (voice models), the others
+  // treat an empty value as unset and don't need it.
+  clearable?: boolean
+  routeName: 'voice' | 'providers' | 'video'
+}
 
 function toModelOptions(
   models: AudioSpeechModelResponse[] | AudioTranscriptionModelResponse[],
@@ -125,8 +105,50 @@ const props = defineProps<{
   videoProviders: VideoProviderResponse[]
 }>()
 
-const speechModelOptions = computed(() => toModelOptions(props.ttsModels, 'speech'))
-const speechProviderOptions = computed(() => toProviderOptions(props.ttsProviders))
-const transcriptionModelOptions = computed(() => toModelOptions(props.transcriptionModels, 'transcription'))
-const transcriptionProviderOptions = computed(() => toProviderOptions(props.transcriptionProviders))
+const router = useRouter()
+
+const rows = computed<MultimediaRow[]>(() => [
+  {
+    field: 'tts_model_id',
+    labelKey: 'bots.settings.ttsModel',
+    placeholderKey: 'bots.settings.ttsModelPlaceholder',
+    models: toModelOptions(props.ttsModels, 'speech'),
+    providers: toProviderOptions(props.ttsProviders),
+    modelType: 'speech',
+    clearable: true,
+    routeName: 'voice',
+  },
+  {
+    field: 'transcription_model_id',
+    labelKey: 'bots.settings.transcriptionModel',
+    placeholderKey: 'bots.settings.transcriptionModelPlaceholder',
+    models: toModelOptions(props.transcriptionModels, 'transcription'),
+    providers: toProviderOptions(props.transcriptionProviders),
+    modelType: 'transcription',
+    clearable: true,
+    routeName: 'voice',
+  },
+  {
+    field: 'image_model_id',
+    labelKey: 'bots.settings.imageModel',
+    placeholderKey: 'bots.settings.imageModelPlaceholder',
+    models: props.imageCapableModels,
+    providers: props.providers,
+    modelType: 'chat',
+    routeName: 'providers',
+  },
+  {
+    field: 'video_model_id',
+    labelKey: 'bots.settings.videoModel',
+    placeholderKey: 'bots.settings.videoModelPlaceholder',
+    models: props.videoModels,
+    providers: props.videoProviders,
+    modelType: 'video',
+    routeName: 'video',
+  },
+])
+
+function openModelSettings(routeName: MultimediaRow['routeName']): void {
+  void router.push({ name: routeName })
+}
 </script>

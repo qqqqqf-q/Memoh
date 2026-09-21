@@ -41,7 +41,10 @@
               />
             </template>
             <template #main>
-              <SidebarInset class="flex flex-col overflow-hidden">
+              <SidebarInset
+                class="relative flex flex-col overflow-hidden"
+                data-settings-content-shell
+              >
                 <!-- Top drag strip over the content pane only (not full-width), so
                      the window stays draggable up here while the sidebar's vertical
                      edge reads as the single continuous divider. No border/fill —
@@ -59,10 +62,14 @@
                      carries the list-mode bar itself. -->
                 <MobileTopBar
                   v-if="isMobile && !isBotDetail && !isListView"
+                  data-settings-content-bar
                   mode="content"
                   @back="onContentBack"
                 />
-                <section class="flex-1 relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]">
+                <section
+                  data-settings-content-scroll
+                  class="flex-1 relative min-h-0 overflow-y-auto [scrollbar-gutter:stable]"
+                >
                   <router-view v-slot="{ Component }">
                     <KeepAlive>
                       <component :is="Component" />
@@ -119,6 +126,7 @@ import MainLayout from '@/layout/main-layout/index.vue'
 import SettingsSidebar from '@/components/settings-sidebar/index.vue'
 import MobileTopBar from './components/mobile-top-bar.vue'
 import { DesktopShellKey } from '@/lib/desktop-shell'
+import { useMacTrafficReserve } from '@/composables/useMacTrafficReserve'
 import { useIsMobile } from '@/composables/useIsMobile'
 import { usePreviousRoute } from '@/composables/useBackOr'
 import { useBackToChatRoute } from '@/composables/useBackToChat'
@@ -133,12 +141,7 @@ const backToChatRoute = useBackToChatRoute()
 
 // macOS desktop only: the settings sidebar now runs to the very top of the window
 // (the old full-width topbar is gone), so its header must clear the traffic lights.
-// Mirrors main-section's computation.
-const macTrafficReserve = computed(() =>
-  desktopShell
-  && typeof navigator !== 'undefined'
-  && navigator.platform.toLowerCase().includes('mac'),
-)
+const macTrafficReserve = useMacTrafficReserve()
 
 // On a single bot's detail page the bot's own nav owns the left column, so we
 // drop the settings nav here to avoid two stacked sidebars (the "three-column"
@@ -200,3 +203,27 @@ function onAfterLeave(): void {
   pendingNext = null
 }
 </script>
+
+<style>
+/* Keep the scroll viewport stationary while list and detail cross-slide.
+   The shell bar overlays it; only the list pane reserves the bar's h-11.
+   Each transitioning pane retains its own inset until it leaves the DOM. */
+[data-settings-content-shell] > [data-settings-content-bar] {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: var(--z-panel);
+}
+[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > [data-view-swap] {
+  display: flow-root;
+}
+[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > :not([data-view-swap]),
+[data-settings-content-shell]:has(> [data-settings-content-bar]) > [data-settings-content-scroll] > [data-view-swap] > :not(:has([data-settings-detail-back])) {
+  margin-top: calc(var(--spacing) * 11);
+}
+/* Cached KeepAlive pages are detached; the separate settings home bar is
+   unaffected. The overlay can hide without resizing the scroll viewport. */
+[data-settings-content-shell]:has([data-settings-detail-back]) > [data-settings-content-bar] {
+  display: none;
+}
+</style>

@@ -7,5 +7,19 @@ if ! command -v golangci-lint >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "Check Go lint..."
-golangci-lint run ./...
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+dirs=$(sh "$SCRIPT_DIR/changed-go-dirs.sh")
+
+if [ "$dirs" = "ALL" ]; then
+  echo "Check Go lint (full repo)..."
+  golangci-lint run ./...
+elif [ -z "$dirs" ]; then
+  echo "No Go changes, skipping Go lint..."
+  exit 0
+else
+  # 只 lint 变更包；跨包破坏由 CI 全量兜底，本地可用 MEMOH_FULL_CHECKS=1 强制全量
+  pkgs=$(echo "$dirs" | sed 's|^|./|; s|$|/...|')
+  echo "Check Go lint (changed packages)..."
+  # shellcheck disable=SC2086
+  golangci-lint run $pkgs
+fi

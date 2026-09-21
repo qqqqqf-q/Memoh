@@ -1,6 +1,6 @@
 <template>
   <SettingsShell width="narrow">
-    <div class="space-y-6">
+    <div class="space-y-4 sm:space-y-6">
       <!-- Identity card: same header shape as the provider detail. -->
       <section class="flex items-center gap-3 rounded-[var(--radius-menu-shell)] border border-border bg-card px-4 py-3">
         <span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
@@ -36,14 +36,20 @@
 
       <!-- Provider configuration card -->
       <form @submit.prevent="handleSaveProvider">
-        <SettingsSection :title="$t('provider.configurationTitle')">
+        <SettingsSection
+          class="provider-configuration"
+          :title="$t('provider.configurationTitle')"
+        >
           <div>
-            <SettingsRow :label="$t('common.name')">
+            <SettingsRow
+              stack="sm"
+              :label="$t('common.name')"
+            >
               <Input
                 id="speech-provider-name"
                 v-model="providerName"
                 type="text"
-                class="w-80"
+                class="w-full sm:w-80"
                 :placeholder="$t('common.namePlaceholder')"
               />
             </SettingsRow>
@@ -51,12 +57,13 @@
             <SettingsRow
               v-for="field in orderedProviderFields"
               :key="field.key"
+              stack="sm"
               :label="field.title || field.key"
               :description="field.description"
             >
               <div
                 v-if="field.type === 'secret'"
-                class="relative w-80"
+                class="relative w-full sm:w-80"
               >
                 <Input
                   :id="`speech-provider-${field.key}`"
@@ -86,7 +93,7 @@
                 :id="`speech-provider-${field.key}`"
                 v-model.number="providerConfig[field.key] as number"
                 type="number"
-                class="w-80"
+                class="w-full sm:w-80"
                 :placeholder="field.example ? String(field.example) : ''"
               />
               <Select
@@ -94,7 +101,7 @@
                 :model-value="String(providerConfig[field.key] ?? '')"
                 @update:model-value="(val) => providerConfig[field.key] = val"
               >
-                <SelectTrigger class="w-80">
+                <SelectTrigger class="w-full sm:w-80">
                   <SelectValue :placeholder="field.title || field.key" />
                 </SelectTrigger>
                 <SelectContent>
@@ -112,7 +119,7 @@
                 :id="`speech-provider-${field.key}`"
                 v-model="providerConfig[field.key] as string"
                 type="text"
-                class="w-80"
+                class="w-full sm:w-80"
                 :placeholder="field.example ? String(field.example) : ''"
               />
             </SettingsRow>
@@ -216,7 +223,8 @@ import {
 } from '@felinic/ui'
 import ModelConfigEditor from './model-config-editor.vue'
 import { Eye, EyeOff } from 'lucide-vue-next'
-import { computed, inject, reactive, ref, watch } from 'vue'
+import { computed, inject, reactive, ref } from 'vue'
+import { useServerSyncedRecord, useServerSyncedScalar } from '@/composables/use-server-synced-form'
 import { ModelListRow, SettingsRow, SettingsSection, SettingsShell, toast } from '@felinic/ui'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryCache } from '@pinia/colada'
@@ -349,11 +357,26 @@ const providerModels = computed<AudioSpeechModelResponse[]>(() => {
   }))
 })
 
-watch(() => providerDetail.value, (provider) => {
-  providerName.value = provider?.name ?? curProvider.value?.name ?? ''
-  Object.keys(providerConfig).forEach((key) => delete providerConfig[key])
-  Object.assign(providerConfig, { ...(provider?.config ?? curProvider.value?.config ?? {}) })
-}, { immediate: true, deep: true })
+// providerName/providerConfig are shared between the user's draft and the
+// server snapshot that colada's refetchOnWindowFocus can replace at any
+// moment — the composables reconcile them (hard reset on provider switch,
+// per-field guard on background refresh). The detail pane is NOT keyed by
+// provider, so the identity function must cover id / template / client_type.
+const providerIdentity = (provider: typeof providerDetail.value) =>
+  String(provider?.id ?? curProvider.value?.id ?? curProvider.value?.provider_template_id ?? curProvider.value?.client_type ?? '')
+
+useServerSyncedScalar(providerName, {
+  source: () => providerDetail.value,
+  identity: providerIdentity,
+  server: provider => provider?.name ?? curProvider.value?.name ?? '',
+  deep: true,
+})
+useServerSyncedRecord(providerConfig, {
+  source: () => providerDetail.value,
+  identity: providerIdentity,
+  server: provider => ({ ...(provider?.config ?? curProvider.value?.config ?? {}) } as Record<string, unknown>),
+  deep: true,
+})
 
 function getModelMeta(modelID: string): SpeechModelMeta | null {
   const models = currentMeta.value?.synthesis_models ?? currentMeta.value?.models ?? []

@@ -512,6 +512,16 @@ function createChatWindow(): BrowserWindow {
   })
   attachWindowStatePersistence(window, 'chat', CHAT_DEFAULTS)
 
+  // macOS hides the traffic lights in fullscreen — the renderer drops its
+  // traffic-light reserve (sidebar gutter / drag strips) on these events.
+  const notifyFullScreenChanged = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('desktop:fullscreen-changed', window.isFullScreen())
+    }
+  }
+  window.on('enter-full-screen', notifyFullScreenChanged)
+  window.on('leave-full-screen', notifyFullScreenChanged)
+
   window.once('ready-to-show', () => {
     restoreWindowMaximized(window, 'chat')
     window.show()
@@ -665,6 +675,11 @@ app.whenReady().then(async () => {
     assertTrustedRenderer(event)
     const sender = BrowserWindow.fromWebContents(event.sender)
     sender?.close()
+  })
+  ipcMain.handle('desktop:is-fullscreen', (event) => {
+    assertTrustedRenderer(event)
+    const sender = BrowserWindow.fromWebContents(event.sender)
+    return sender ? sender.isFullScreen() : false
   })
   ipcMain.handle('desktop:server-status', (event) => {
     assertTrustedRenderer(event)

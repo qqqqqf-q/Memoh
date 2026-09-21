@@ -1,0 +1,86 @@
+- generic [active] [ref=f13e1]:
+  - generic [ref=f13e3]:
+    - generic [ref=f13e6]:
+      - generic [ref=f13e7]:
+        - button "Open navigation" [ref=f13e8] [cursor=pointer]
+        - generic [ref=f13e10]: "111"
+        - button "New panel" [ref=f13e11] [cursor=pointer]
+      - main [ref=f13e13]:
+        - generic [ref=f13e18]:
+          - generic [ref=f13e28]:
+            - region "New Session" [ref=f13e35]:
+              - tabpanel "New Session Close" [ref=f13e36]
+            - status [ref=f13e37]
+            - alert [ref=f13e38]
+          - generic [ref=f13e43]:
+            - generic:
+              - generic:
+                - generic:
+                  - heading "What would you like to do?" [level=1]
+                - group [ref=f13e54]:
+                  - textbox "Ask anything…" [ref=f13e55]
+                  - button "Add files or switch Agent" [ref=f13e56] [cursor=pointer]
+                  - button "Continue on" [ref=f13e58] [cursor=pointer]
+                  - generic [ref=f13e61]:
+                    - button "DeepSeek V4 Flash · Medium" [ref=f13e62] [cursor=pointer]
+                    - generic [ref=f13e66]:
+                      - button "Start voice input" [ref=f13e67] [cursor=pointer]
+                      - button "Send message" [disabled]
+    - main [ref=f13e75]:
+      - generic [ref=f13e128]:
+        - generic [ref=f13e130]:
+          - button "Bots" [ref=f13e131] [cursor=pointer]
+          - generic [ref=f13e134]:
+            - generic [ref=f13e135]:
+              - generic [ref=f13e136]: "11"
+              - button "Edit" [ref=f13e138]
+            - generic [ref=f13e142]:
+              - generic [ref=f13e143]:
+                - heading "111" [level=2] [ref=f13e144]
+                - button [ref=f13e145]
+              - generic "1 issues" [ref=f13e151]
+          - textbox "Search" [ref=f13e156]
+        - generic [ref=f13e161]:
+          - list [ref=f13e163]:
+            - listitem [ref=f13e164]:
+              - button "Overview" [ref=f13e165] [cursor=pointer]
+            - listitem [ref=f13e168]:
+              - button "General" [ref=f13e169] [cursor=pointer]
+            - listitem [ref=f13e172]:
+              - button "Platforms" [ref=f13e173] [cursor=pointer]
+          - list [ref=f13e177]:
+            - listitem [ref=f13e178]:
+              - button "Memory" [ref=f13e179] [cursor=pointer]
+            - listitem [ref=f13e182]:
+              - button "Tool Approval" [ref=f13e183] [cursor=pointer]
+            - listitem [ref=f13e186]:
+              - button "Hooks" [ref=f13e187] [cursor=pointer]
+            - listitem [ref=f13e190]:
+              - button "Agents" [ref=f13e191] [cursor=pointer]
+            - listitem [ref=f13e194]:
+              - button "Connectors" [ref=f13e195] [cursor=pointer]
+            - listitem [ref=f13e198]:
+              - button "MCP" [ref=f13e199] [cursor=pointer]
+            - listitem [ref=f13e202]:
+              - button "Skills" [ref=f13e203] [cursor=pointer]
+          - list [ref=f13e207]:
+            - listitem [ref=f13e208]:
+              - button "Desktop" [ref=f13e209] [cursor=pointer]
+            - listitem [ref=f13e212]:
+              - button "Computers" [ref=f13e213] [cursor=pointer]
+            - listitem [ref=f13e216]:
+              - button "Workspace" [ref=f13e217] [cursor=pointer]
+            - listitem [ref=f13e220]:
+              - button "Network" [ref=f13e221] [cursor=pointer]
+            - listitem [ref=f13e224]:
+              - button "Heartbeat" [ref=f13e225] [cursor=pointer]
+            - listitem [ref=f13e228]:
+              - button "Compaction" [ref=f13e229] [cursor=pointer]
+            - listitem [ref=f13e232]:
+              - button "Schedule" [ref=f13e233] [cursor=pointer]
+          - list [ref=f13e237]:
+            - listitem [ref=f13e238]:
+              - button "Access" [ref=f13e239] [cursor=pointer]
+            - listitem [ref=f13e242]:
+              - button "Email" [ref=f13e243] [cursor=pointer]
+  - region "Notifications"

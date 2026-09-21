@@ -182,12 +182,27 @@
         class="pointer-events-none absolute z-(--z-panel)"
         :class="[
           isWelcome
-            ? 'inset-0 flex flex-col items-center justify-start pt-[28dvh]'
+            ? 'inset-0 flex flex-col items-center justify-start'
             : 'inset-x-0 bottom-0 pt-2 pb-7',
           { invisible: composerPlacementPending },
         ]"
         :style="composerLiftPx > 0 ? { bottom: `${composerLiftPx}px` } : undefined"
       >
+        <!-- Anchor spacer for the welcome column: 28% of the PANE's height,
+             clamped to 4rem–16rem, keeps the greeting + composer at their
+             familiar optical anchor while staying proportional in split
+             panes. Must not become a vh/dvh padding again: viewport units
+             ignore the pane's own height, and in short panes (vertical
+             splits) the offset alone can push the composer past the group's
+             overflow-hidden edge, where the next pane's tab strip reads as
+             covering it. The % resolves against this inset-0 flex column's
+             height — i.e. the pane. (h- + shrink-0, not flex-none + basis:
+             the flex shorthand would reset flex-basis to auto.) -->
+        <div
+          v-if="isWelcome"
+          aria-hidden="true"
+          class="h-[clamp(4rem,28%,16rem)] w-px shrink-0"
+        />
         <!-- Opaque backdrop, bottom-anchored, rising only to the box's widest point
              (its vertical centre). The box is solid and sits above the messages, so
              above that line its rounded top simply floats over whatever is there —
@@ -203,9 +218,10 @@
           :style="{ height: dockMaskHeight }"
         />
         <!-- welcome: top-anchored column — the greeting and the composer's top
-             edge stay pinned at the shared viewport anchor, so a growing composer
-             (text or attachments) only extends downward and never pushes the
-             greeting up; normal: display:contents removes this from layout. -->
+             edge stay pinned at the spacer's pane-relative anchor, so a growing
+             composer (text or attachments) only extends downward and never
+             pushes the greeting up; normal: display:contents removes this from
+             layout. -->
         <div :class="isWelcome ? 'flex w-full flex-col items-center gap-8 md:-translate-x-3' : 'contents'">
           <div
             v-if="isWelcome"
@@ -750,8 +766,49 @@
                          The context-pressure ring itself is only shelved for
                          now, not deleted — its useSessionInfo data source
                          stays wired below (untouched) because the /compact
-                         quick action's live percentage still reads off it. -->
+                         quick action's live percentage still reads off it.
+                         The mic is likewise only shelved (voiceInputEnabled,
+                         see script): the button stays here, v-if'd out of the
+                         tree, until the default transcription model lands. -->
+                    <!-- Inactive stand-in while voice input is shelved: the
+                         send circle's grayed self — the same primary fill the
+                         mic wore, dropped to the contract's disabled
+                         opacity-40, carrying the send glyph so activation
+                         reads as the SAME button waking up (it scales down
+                         while brand send springs in on the original
+                         cross-fade timing). NOT `disabled`: its
+                         disabled:opacity-40 out-specifies the opacity-0
+                         hide, pinning the fade at 40% — the gray comes from
+                         the shown branch instead. Inert via
+                         pointer-events-none + tabindex -1; aria-hidden
+                         because it announces nothing the real send doesn't.
+                         Delete it when voiceInputEnabled flips on. -->
                     <Button
+                      v-if="!voiceInputEnabled"
+                      type="button"
+                      variant="primary"
+                      shape="circle"
+                      aria-hidden="true"
+                      tabindex="-1"
+                      class="pointer-events-none absolute inset-0 size-8 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
+                      :class="inactiveSlotVisible ? 'scale-100 opacity-40' : 'scale-75 opacity-0'"
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.75"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="size-[18px] max-md:size-5"
+                        aria-hidden="true"
+                      >
+                        <path d="M12 19.5 V5" />
+                        <path d="M6 10.5 L12 4.5 L18 10.5" />
+                      </svg>
+                    </Button>
+                    <Button
+                      v-if="voiceInputEnabled"
                       type="button"
                       variant="primary"
                       shape="circle"
@@ -759,7 +816,7 @@
                       :title="voiceInputLabel"
                       :aria-label="voiceInputLabel"
                       class="absolute inset-0 size-8 max-md:size-11 rounded-full transition-[opacity,scale] duration-200 ease-out motion-reduce:transition-none"
-                      :class="micVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
+                      :class="inactiveSlotVisible ? 'scale-100 opacity-100' : 'pointer-events-none scale-75 opacity-0'"
                       @click="handleVoiceInput"
                     >
                       <Spinner
@@ -2510,17 +2567,27 @@ const {
 
 const showSend = computed(() => Boolean(inputText.value.trim()) || pendingFiles.value.length > 0 || requestedSkills.value.length > 0)
 
-// Whether the trailing slot shows the send button (vs. mic — see micVisible
-// just below, its exact complement). Streaming always wins the slot for stop,
-// same as before; unlike the old ring-era rule this no longer special-cases
-// ACP, because mic — not a dimmed disabled send — is what now fills the slot
-// on empty input in EVERY mode.
+// TODO(voice-input): shelved until a default transcription model ships —
+// today the mic dead-ends users into a settings detour. The whole path (mic
+// button, MediaRecorder/transcription plumbing, the mic⇄send cross-fade)
+// stays in place behind this flag; a disabled send-styled placeholder holds
+// the inactive slot meanwhile. Once the default model lands, open an issue
+// to restore voice input: flip this to true and delete the placeholder.
+const voiceInputEnabled = false
+
+// Whether the trailing slot shows the send button (vs. its inactive occupant
+// — see inactiveSlotVisible just below, its exact complement). Streaming
+// always wins the slot for stop, same as before; unlike the old ring-era
+// rule this no longer special-cases ACP, because mic — not a dimmed disabled
+// send — is what now fills the slot on empty input in EVERY mode.
 const sendButtonVisible = computed(() => showSend.value || streaming.value)
 
-// Mic owns the trailing slot whenever send doesn't: nothing to send is
-// exactly when voice input is the useful affordance there. Exact complement
-// of sendButtonVisible so the two can never both show (or both hide).
-const micVisible = computed(() => !sendButtonVisible.value)
+// The slot's inactive occupant: a grayed send stand-in while voice input is
+// shelved, the mic itself once voiceInputEnabled flips back on (nothing to
+// send is exactly when voice input is the useful affordance there). Exact
+// complement of sendButtonVisible so the two can never both show (or both
+// hide).
+const inactiveSlotVisible = computed(() => !sendButtonVisible.value)
 
 // Voice input: MediaRecorder → the bot's configured transcription model →
 // transcript appended into the draft. The recorder/stream live outside

@@ -1,0 +1,17 @@
+- generic [ref=f7e1]:
+  - main [ref=f7e4]:
+    - generic [ref=f7e5]:
+      - generic [ref=f7e6]:
+        - heading "Sign in" [level=1] [ref=f7e8]
+        - paragraph [ref=f7e9]: Start building with Memoh
+      - generic [ref=f7e10]:
+        - textbox "Enter username" [active] [ref=f7e11]
+        - group [ref=f7e12]:
+          - textbox "Enter password" [ref=f7e13]
+          - group [ref=f7e14]:
+            - button "Show password" [ref=f7e15] [cursor=pointer]
+        - button "Loading Continue" [disabled] [ref=f7e17]:
+          - generic:
+            - status "Loading"
+          - generic [ref=f7e18]: Continue
+  - region "Notifications"

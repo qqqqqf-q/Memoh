@@ -1,0 +1,25 @@
+- generic [ref=e1]:
+  - main [ref=e4]:
+    - generic [ref=e5]:
+      - heading "Enter your password" [level=1] [ref=e20]
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - generic [ref=e21]: Email
+          - generic [ref=e16]:
+            - textbox "Email" [ref=e24]:
+              - /placeholder: Enter email or username
+              - text: admin
+            - button "Edit" [ref=e25] [cursor=pointer]
+          - generic [ref=e29]:
+            - generic [ref=e30]: Password
+            - group [ref=e31]:
+              - textbox "Password" [active] [ref=e32]:
+                - /placeholder: Enter password
+              - group [ref=e33]:
+                - button "Show password" [ref=e34] [cursor=pointer]
+          - button "Loading Continue" [disabled] [ref=e18]:
+            - generic:
+              - status "Loading"
+            - generic [ref=e19]: Continue
+        - button "Back" [ref=e39] [cursor=pointer]
+  - region "Notifications"

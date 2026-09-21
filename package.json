@@ -13,7 +13,7 @@
     "release:major": "bumpp major --yes",
     "publish:npm": "node scripts/publish-packages.mjs",
     "generate-sdk": "openapi-ts",
-    "lint": "eslint .",
+    "lint": "eslint . --cache",
     "lint:fix": "eslint . --fix",
     "test": "vitest",
     "prepare": "husky",

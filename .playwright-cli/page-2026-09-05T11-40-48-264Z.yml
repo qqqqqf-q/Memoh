@@ -1,0 +1,12 @@
+- generic [ref=f1e4]:
+  - heading "配置" [level=2] [ref=f1e6]
+  - generic [ref=f1e7]:
+    - generic [ref=f1e8]:
+      - generic [ref=f1e9]: API Key
+      - textbox "API Key" [ref=f1e12]
+    - generic [ref=f1e13]:
+      - generic [ref=f1e14]: Base URL
+      - textbox "Base URL" [ref=f1e17]: https://api.bing.microsoft.com/v7.0/search
+    - generic [ref=f1e18]:
+      - generic [ref=f1e19]: Timeout (seconds)
+      - spinbutton "Timeout (seconds)" [ref=f1e22]: "15"
