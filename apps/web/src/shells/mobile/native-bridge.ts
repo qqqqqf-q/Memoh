@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted } from 'vue'
+import { onActivated, onBeforeMount, onBeforeUnmount, onDeactivated } from 'vue'
 import type { Router } from 'vue-router'
 import { canGoBack } from '@/composables/useBackOr'
 
@@ -75,16 +75,25 @@ export function onNativeBack(handler: NativeBackHandler): () => void {
   }
 }
 
-// Registers the handler for as long as the calling component is mounted.
+// Registers the handler while the calling component is on screen.
+// Registered before mount, not after: a parent finishes mounting after its
+// children, so registering on mount would put the parent above the view
+// nested in it. A KeepAlive-cached page (settings pages are) is hidden without
+// unmounting, so deactivation unregisters it and reactivation puts it back on
+// top.
 export function useNativeBack(handler: NativeBackHandler): void {
   let unregister: (() => void) | null = null
-  onMounted(() => {
-    unregister = onNativeBack(handler)
-  })
-  onBeforeUnmount(() => {
+  const register = () => {
+    unregister ??= onNativeBack(handler)
+  }
+  const release = () => {
     unregister?.()
     unregister = null
-  })
+  }
+  onBeforeMount(register)
+  onActivated(register)
+  onDeactivated(release)
+  onBeforeUnmount(release)
 }
 
 // System bars. The page draws under the status bar and the gesture bar, so

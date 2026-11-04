@@ -340,6 +340,7 @@ import { useAvatarInitials } from '@/composables/useAvatarInitials'
 import { useSyncedQueryParam } from '@/composables/useSyncedQueryParam'
 import { useBackAffordance } from '@/composables/useBackOr'
 import { useIsMobile } from '@/composables/useIsMobile'
+import { useNativeBack } from '@/shells/mobile/native-bridge'
 import { registerBotBreadcrumbName } from '@/lib/bot-breadcrumb'
 import { useBotStatusMeta } from '@/composables/useBotStatusMeta'
 import MasterDetailSidebarLayout from '@/components/master-detail-sidebar-layout/index.vue'
@@ -560,6 +561,16 @@ function closeMobileDetail(): void {
   const { tab: _drop, ...rest } = route.query
   void router.replace({ query: rest }).catch(() => {})
 }
+
+// System back does what this page's own back buttons do: on a phone it first
+// leaves a tab for the tab list, then leaves the bot. Without this the
+// settings shell would answer, and on a cold load step straight up to the
+// settings list.
+useNativeBack(() => {
+  if (isMobile.value && mobileDetailOpen.value) closeMobileDetail()
+  else goBack()
+  return true
+})
 
 const groupedTabs = computed(() => [
   { key: 'core', keys: ['overview', 'general', 'channels'] },
