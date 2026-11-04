@@ -6,22 +6,23 @@
 ## 目录
 
 - [技术栈与模块边界](#技术栈与模块边界), L:20
-- [目录地图](#目录地图), L:39
-- [认证样板参考页（抄代码只抄这些）](#认证样板参考页抄代码只抄这些), L:66
-- [宿主页面局部原语（Surface-scoped owners）](#宿主页面局部原语surface-scoped-owners), L:79
-- [页面重构与交接自检流程](#页面重构与交接自检流程), L:106
-- [路由与三层常驻布局](#路由与三层常驻布局), L:117
-- [数据层与客户端 Store 分工](#数据层与客户端-store-分工), L:145
-- [流式传输（WebSocket 与活动 SSE）](#流式传输websocket-与活动-sse), L:167
-- [工作区依赖操作契约](#工作区依赖操作契约), L:182
-- [工作区面板、远程桌面与 Browser / Computer Use](#工作区面板远程桌面与-browser--computer-use), L:189
-- [本地开发与路径别名](#本地开发与路径别名), L:196
+- [目录地图](#目录地图), L:40
+- [认证样板参考页（抄代码只抄这些）](#认证样板参考页抄代码只抄这些), L:70
+- [宿主页面局部原语（Surface-scoped owners）](#宿主页面局部原语surface-scoped-owners), L:83
+- [页面重构与交接自检流程](#页面重构与交接自检流程), L:110
+- [路由与三层常驻布局](#路由与三层常驻布局), L:121
+- [数据层与客户端 Store 分工](#数据层与客户端-store-分工), L:156
+- [流式传输（WebSocket 与活动 SSE）](#流式传输websocket-与活动-sse), L:178
+- [工作区依赖操作契约](#工作区依赖操作契约), L:193
+- [工作区面板、远程桌面与 Browser / Computer Use](#工作区面板远程桌面与-browser--computer-use), L:200
+- [本地开发与路径别名](#本地开发与路径别名), L:207
 
 ## 技术栈与模块边界
 
 `@memohai/web`（`apps/web`）是 Memoh 的管理与聊天前端，使用 Vue 3（`<script setup>`）+ Vite 8 构建。
 在服务端部署模式下，它作为独立浏览器应用运行；原生桌面客户端（`apps/desktop`）直接复用 `@memohai/web`
 导出的页面、store、路由工厂、i18n 和 API 客户端，自身只负责 Electron 窗口、托盘、菜单和预加载 IPC。
+手机上的移动壳（`apps/mobile`）用 Capacitor 在系统 WebView 里加载 `apps/web`，自身只负责系统返回、系统栏和打包。
 任何时候都必须保证 `apps/web` 能作为纯浏览器应用独立运行（M6）。
 
 | 领域 | 技术选型 |
@@ -53,6 +54,9 @@
   - 其他设置页：`providers/`（服务商总页，通过 `?tab=` 切换 `models-panel.vue`、`web-search/`、`voice/`、`video/` 四个子范围面板；旧路径 `/settings/web-search`、`/settings/voice`、`/settings/video`、`/settings/speech`、`/settings/transcription` 均为重定向）、`runtimes/`（远程运行时与计算节点 Computers）、`supermarket/`、`usage/`、`people/`、`appearance/`、`keyboard-shortcuts/`、`profile/`（Account）、`about/`。独立 `/settings/memory` 已移除并入 Bot 详情的记忆 Tab（旧路径重定向至 `/settings/bots`）。
   - 独立全屏页：`login/`、`onboarding/`、`oauth/`、`providers/connect.vue`（通用 Provider 深度链接导入确认页）、
     `dev/components/`（开发组件墙）。
+- **外壳（`shells/`）**：页面外面的那一层，即导航和进入页面的方式。外壳编排共享的数据和面板，不重新实现它们。
+  `shells/mobile/` 是手机端外壳：顶栏、导航抽屉、两页式导航与手机首页（目前只能在开发版的手机视觉方向
+  对比开关 `pages/dev/mobile-directions` 里切换，正式版用导航抽屉）、Bot 胶囊，以及与移动壳的桥接 `native-bridge.ts`（系统返回、系统栏，见 U7、M6）。
 - **业务共享组件（`components/`）**：跨两个以上页面复用的业务 owner（如 `sidebar/`、`master-detail-sidebar-layout/`、
   `file-manager/`、`terminal/`、`monaco-editor/`、`loading-button/`、`form-dialog-shell/` 等）。选型前先查
   `packages/ui/skills/ui-owners/SKILL.md`。
@@ -124,12 +128,19 @@ Web 和 Desktop 各自的入口里。
 1. **常驻聊天层（`MainSection`）**：只要当前路由属于聊天（`/`、`/bot/:botName?`）**或**设置（`/settings/*`），
    `MainSection` 就一直保持全尺寸挂载在底层。聊天路由在 `routes.ts` 里只注册空占位（null stub）。这样从聊天切去
    设置再切回来时，dockview 的分屏结构、终端连接和消息滚动位置完全不会卸载重排（Vue 的 `KeepAlive` 保不住
-   dockview 布局，卸载必闪屏，见 U5）。
+   dockview 布局，卸载必闪屏，见 U5）。窗口小于 `768px` 时，`MainSection` 用 `shells/mobile/` 的顶栏和导航替换
+   桌面侧栏。
 2. **设置覆盖层（`pages/settings-section/`）**：全屏固定层，靠可见性切换盖在聊天层上方；离开设置页时会等离场过渡
    `after-leave` 播完才放行路由守卫。内部用 `MainLayout` + `SettingsSidebar` + `<KeepAlive>` 包裹设置子页面；浏览器空闲时由 `prefetchSettingsPages()` 逐个串行预热设置页分包。
    Web 端直接访问 `/settings` 会展示移动端设置导航列表；Desktop 端会重定向到 `/settings/bots`。
 3. **独立全屏页（`/login`、`/onboarding`、`/oauth/*`、`/dev/*`）**：处于这些路由时，上面两层都不挂载，由顶层
    `<RouterView>` 单独全屏渲染。
+
+**手机与电脑的差异**分四类，每类只有一处归属，页面不自己按 `useIsMobile` 分叉：
+- **尺寸**（字号、控件高度、图标）：归设计 token。触控档位尚未建立，目前由 `shells/mobile/` 内部按 Android 的尺度取值。
+- **形态**（对话框在手机上变成底部面板、菜单变成操作面板）：归组件库，同一个组件提供两种呈现。目前还没有这类组件。
+- **结构**（桌面侧栏与手机端导航、手机首页）：归 `shells/`。
+- **平台能力**（系统返回、系统栏、打包）：归移动壳 `apps/mobile`，网页只经 `shells/mobile/native-bridge.ts` 接入（M6）。
 
 **路由守卫规则**：除 `/login`、`/oauth/*` 和 `/providers/connect` 外均需本地 token；未完成初始引导的登录用户自动跳 `/onboarding`（浏览器按账号在 `store/user.ts` 记住已确认完成的引导记录，在 `store/chat-selection.ts` 记住上次打开的 Bot，因此老账号冷启动或重新登录时**不在首屏渲染前等待 `/users/me` 或 Bot 列表请求**，直接放行进入对话并在后台校验）；带
 `meta.adminOnly` 的路由（如 `/settings/people`）要求 `user.role === 'admin'`；动态分包加载失败（chunk load error）

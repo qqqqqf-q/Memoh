@@ -11,7 +11,7 @@ The shell owns:
 - haptics and other device capabilities exposed to the page;
 - packaging, app id, name, icons and splash.
 
-The shell must not contain pages or app UI, and `apps/web` must not be forked for mobile. Mobile layout and navigation live in `apps/web/src/shells/mobile/`; see the "Layout System" section of `apps/web/AGENTS.md` for where each kind of mobile difference goes.
+The shell must not contain pages or app UI, and `apps/web` must not be forked for mobile. Mobile layout and navigation live in `apps/web/src/shells/mobile/`. The host boundary is rule M6 and the back model is rule U7 in `.agents/skills/memoh-frontend-rules/references/rules.md`; where each kind of mobile difference goes is in `references/architecture.md` of the same skill.
 
 Everything the shell and the page ask of each other goes through one module on the web side, `apps/web/src/shells/mobile/native-bridge.ts`, which documents the contract. Change both sides together.
 
