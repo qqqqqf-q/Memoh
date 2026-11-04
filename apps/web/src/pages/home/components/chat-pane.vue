@@ -116,7 +116,7 @@
                    (see tryApplyPin in useChatScroll). -->
               <div
                 v-for="(turn, turnIndex) in messageTurns"
-                :key="turn.id"
+                :key="renderKeyOf(turn.id)"
                 :ref="turnIndex === messageTurns.length - 1 ? setLastTurnEl : undefined"
                 :style="turnReserveStyle(turn.id)"
                 data-chat-turn
@@ -127,7 +127,7 @@
                 >
                   <template
                     v-for="(msg, msgIndex) in turn.messages"
-                    :key="msg.id"
+                    :key="renderKeyOf(msg.id)"
                   >
                     <ForkSourceDivider
                       v-if="showForkSourceDividerBefore(turn.start + msgIndex)"
@@ -652,7 +652,7 @@
                   v-model="inputText"
                   rows="1"
                   :placeholder="composerPreviewShown ? '' : composerPlaceholder"
-                  :disabled="!currentBotId || composerReadOnly || firstSendAwaiting"
+                  :disabled="!currentBotId || composerReadOnly || firstSendAwaiting || stopPending"
                   class="order-none max-h-52 w-full basis-full field-sizing-content resize-none break-words bg-transparent pl-2 pr-1 pt-2 pb-1.5 text-base leading-[var(--chat-leading)] outline-none placeholder:text-[var(--field-placeholder)] disabled:cursor-not-allowed"
                   :class="[isWelcome ? 'min-h-12' : 'min-h-10', composerPreviewShown ? 'text-transparent' : 'text-foreground']"
                   @keydown="handleComposerKeydown"
@@ -1318,7 +1318,9 @@ import { useQuery } from '@pinia/colada'
 import { deleteBotsByBotIdSessionsBySessionIdAcpRuntimeNativeSession, getAcpProfiles, getBotsByBotIdSettings, getBotsByBotIdWorkspaceTargets, postTranscriptionModelsByIdTest } from '@memohai/sdk'
 import type { AcpprofilePublicProfile, BotagentsBotAgent, WorkspaceWorkspaceTarget } from '@memohai/sdk'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { CHAT_ROUTE_NAMES } from '@/constants/chat-routes'
+import { useSessionViewing } from '@/composables/useSessionViewing'
 import FileDropOverlay from '@/components/file-drop-overlay/index.vue'
 import { useFileDropZone } from '@/composables/useFileDropZone'
 import { registerChatFileDropTarget } from '../composables/chat-file-drop-target'
@@ -1344,6 +1346,7 @@ import SessionFollowUpQueue from './session-follow-up-queue.vue'
 import { usePendingApprovals } from '../composables/usePendingApprovals'
 import ChatScrollRail, { type ScrollRailSegment } from './chat-scroll-rail.vue'
 import { provideBgTaskBeacons } from '../composables/useBgTaskBeacons'
+import { provideUserEditDraft } from '../composables/useUserEditDraft'
 import MediaGalleryLightbox from './media-gallery-lightbox.vue'
 import SessionInfoRing from './session-info-ring.vue'
 import { useSessionInfo } from '../composables/useSessionInfo'
@@ -1407,6 +1410,7 @@ const props = withDefaults(defineProps<{
 const { t, te, locale } = useI18n()
 const runtimeText = (key: string, fallback: string) => te(key) || te(key, 'en') ? t(key) : fallback
 const router = useRouter()
+const route = useRoute()
 const chatStore = useChatStore()
 const workspaceTabs = useWorkspaceTabsStore()
 const { pill: bgTaskPill, scrollToOffscreen, cleanup: cleanupBgTaskBeacons } = provideBgTaskBeacons()
@@ -1461,6 +1465,10 @@ provideConnectorLogos(paneTarget)
 const paneView = computed(() => chatStore.chatView(paneTarget.value))
 const messages = computed(() => paneView.value.transcript.visibleMessages.value)
 const loadingMessages = computed(() => paneView.value.transcript.loadingMessages.value)
+/** Kept-alive panes behind settings, loading transcripts and inactive splits are not readers. */
+const canReadSession = computed(() => isActive.value && isVisible.value
+  && !loadingMessages.value && !loadingChats.value && CHAT_ROUTE_NAMES.has(String(route.name)))
+useSessionViewing(computed(() => props.sessionId ?? null), canReadSession)
 // Delayed skeleton reveal: local/fast loads finish within a few frames, and
 // flashing the placeholder for a frame or two reads as a glitch. Mount it
 // only when loading actually outlives the delay.
@@ -1547,6 +1555,8 @@ const firstSendEntry = computed(() => chatStore.firstSendFor(paneTarget.value))
 const draftSendStarting = ref(false)
 const firstSendAwaiting = computed(() =>
   draftSendStarting.value || (!!firstSendEntry.value && !firstSendEntry.value.revealed))
+// A stop that waits for the server to end the run; its draft may come back.
+const stopPending = computed(() => chatStore.isChatViewStopping(paneTarget.value))
 // A draft whose first message is in flight is committed to its setup (the
 // folder travels with that message), even before a session id exists.
 const draftSetupEditable = computed(() => !hasRenderedSession.value && !firstSendEntry.value && !draftSendStarting.value)
@@ -3384,6 +3394,7 @@ const composerAction = computed(() => resolveComposerAction({
   hasSkills: skillSlashEnabled.value && requestedSkills.value.length > 0,
   streaming: streaming.value,
   awaitingFirstSend: firstSendAwaiting.value,
+  stopping: stopPending.value,
   queuePending: queueSubmissionGate.pending,
   active: isActive.value,
   hasBot: !!currentBotId.value,
@@ -3941,6 +3952,28 @@ const messageTurns = computed(() => {
 })
 const lastMessageId = computed(() => messages.value[messages.value.length - 1]?.id ?? '')
 
+// Saving an edit swaps the prompt for a new optimistic turn under a new id.
+// Keyed by that id, the whole turn would remount — the edit field could not
+// fold back into its bubble and the turn's height snapped. The replacement
+// borrows the edited prompt's Vue key instead, so the same component settles
+// in place. The alias is for Vue keys only (the store's ids are untouched) and
+// steps aside if the borrowed key is ever on screen again, so it can never
+// produce a duplicate key.
+const editRenderKeys = reactive(new Map<string, string>())
+const visibleMessageIds = computed(() => new Set(messages.value.map(message => message.id)))
+function renderKeyOf(id: string): string {
+  const borrowed = editRenderKeys.get(id)
+  return borrowed && !visibleMessageIds.value.has(borrowed) ? borrowed : id
+}
+const userEditDraft = provideUserEditDraft()
+watch(() => paneTarget.value.sessionId, () => {
+  editRenderKeys.clear()
+  userEditDraft.value = null
+})
+function latestUserMessage(): ChatMessage | undefined {
+  return messages.value.findLast(message => message.role === 'user')
+}
+
 const {
   isScrolling,
   highlightedMessageId,
@@ -3950,6 +3983,8 @@ const {
   suppressAutoScrollForPrepend,
   markEscaped,
   pinAfterSend,
+  pinAfterEdit,
+  pinAfterRetry,
   pinAfterSteer,
   pinAfterFollowUp,
   onActivatedRestoreScroll,
@@ -4125,13 +4160,27 @@ async function handleRetryMessage(turnId: string) {
   if (composerConfigPending.value) return
   composerError.value = ''
   const { pair: sendPair, finish: finishPairSend } = composerPair.beginSend()
-  const result = await chatStore.retryLatestAssistant(turnId, {
+  const replyBefore = messages.value.at(-1)?.id
+  const pending = chatStore.retryLatestAssistant(turnId, {
     target: paneTarget.value,
     modelId: sendPair.modelId,
     reasoningEffort: sendPair.reasoningEffort,
     workspaceTargetId: sendWorkspaceTargetId.value,
     onModelPreferenceSettled: () => finishPairSend(false),
   }).finally(() => finishPairSend(false))
+  // The store has already swapped the reply for a placeholder (that part
+  // runs before its first await); pin the prompt like a send before Vue
+  // renders the swap.
+  const prompt = latestUserMessage()
+  const rollbackPin = prompt && messages.value.at(-1)?.id !== replyBefore
+    ? pinAfterRetry(prompt.id)
+    : null
+  const result = await pending.catch((error: unknown) => {
+    rollbackPin?.()
+    throw error
+  })
+  // A failed start restores the old reply; put the view back with it.
+  if (!(result.ok || result.stage === 'stream')) rollbackPin?.()
   finishPairSend(result.ok || result.stage === 'stream')
   await refreshACPComposerConfigAfterSelectionError(result)
   if (!result.ok && result.error) {
@@ -4139,29 +4188,52 @@ async function handleRetryMessage(turnId: string) {
   }
 }
 
-async function handleEditMessage(turnId: string, text: string, done?: (started: boolean) => void) {
+async function handleEditMessage(turnId: string, text: string) {
+  // An edit that never starts gives the draft back to the restored prompt's
+  // editor (useUserEditDraft) — unless the pane has moved to another session.
+  const sessionId = paneTarget.value.sessionId
+  const reopenEditor = () => {
+    if (paneTarget.value.sessionId === sessionId) userEditDraft.value = { turnId, draft: text }
+  }
   if (composerConfigPending.value) {
-    done?.(false)
+    reopenEditor()
     return
   }
   composerError.value = ''
   const { pair: sendPair, finish: finishPairSend } = composerPair.beginSend()
+  let rollbackPin: (() => void) | null = null
   try {
-    const result = await chatStore.editLatestUser(turnId, text, {
+    const edited = latestUserMessage()
+    const pending = chatStore.editLatestUser(turnId, text, {
       target: paneTarget.value,
       modelId: sendPair.modelId,
       reasoningEffort: sendPair.reasoningEffort,
       workspaceTargetId: sendWorkspaceTargetId.value,
       onModelPreferenceSettled: () => finishPairSend(false),
     })
-    finishPairSend(result.ok || result.stage === 'stream')
+    // The store has already swapped in the optimistic prompt (that part runs
+    // before its first await); hand it the edited prompt's key and pin it
+    // like a send before Vue renders the swap.
+    const replacement = latestUserMessage()
+    if (edited && replacement && replacement.id !== edited.id) {
+      editRenderKeys.set(replacement.id, renderKeyOf(edited.id))
+      rollbackPin = pinAfterEdit(edited.id, replacement.id)
+    }
+    const result = await pending
+    const started = result.ok || result.stage === 'stream'
+    // A failed start restores the edited turn; put the view back with it.
+    if (!started) {
+      rollbackPin?.()
+      reopenEditor()
+    }
+    finishPairSend(started)
     await refreshACPComposerConfigAfterSelectionError(result)
     if (!result.ok && result.error) {
       composerError.value = result.error
     }
-    done?.(result.ok || result.stage === 'stream')
   } catch {
-    done?.(false)
+    rollbackPin?.()
+    reopenEditor()
   } finally {
     finishPairSend(false)
   }
@@ -4172,7 +4244,7 @@ async function handleSend(source: ComposerActionSource = 'submit') {
   if (!skillSlashEnabled.value && requestedSkills.value.length) requestedSkills.value = []
   const action = composerAction.value
   await dispatchComposerAction(action, source, {
-    stop: () => { chatStore.abort(paneTarget.value) },
+    stop: () => { chatStore.abort(paneTarget.value, { awaitOutcome: true }) },
     send: executeComposerSend,
     enqueue: executeComposerEnqueue,
     'local-command': executeLocalComposerCommand,
